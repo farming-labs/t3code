@@ -541,11 +541,14 @@ jobs:
             apps/server/src/orchestration-v2/ProjectionStore.worktreeRoots.test.ts
             apps/server/src/serverRuntimeStartup.test.ts
             apps/server/src/serverRuntimeStartup.autoPull.test.ts
+            apps/server/src/workspace/WorkspaceStorage.test.ts
             scripts/lib/riftri-packaging.test.ts)
           if test "$RUNNER_OS" = Linux; then
+            export T3CODE_TEST_RIFTRI_BACKEND=overlay-fs
             export TMPDIR="$RUNNER_TEMP/t3-riftri-overlay"
             unshare --user --map-root-user --mount --propagation private -- "${command[@]}"
           else
+            export T3CODE_TEST_RIFTRI_BACKEND=apfs-clone
             "${command[@]}"
           fi
 

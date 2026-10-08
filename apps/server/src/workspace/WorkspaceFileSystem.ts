@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema";
 
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
+import * as WorkspaceStorage from "./WorkspaceStorage.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
 
@@ -96,6 +97,7 @@ export class WorkspaceBinaryFileError extends Schema.TaggedError<WorkspaceBinary
 }
 
 export const WorkspaceFileSystemError = Schema.Union([
+  WorkspaceStorage.WorkspaceStorageUnavailableError,
   WorkspaceFileSystemOperationError,
   WorkspaceFilePathEscapeError,
   WorkspacePathNotFileError,
@@ -138,6 +140,7 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+  const workspaceStorage = yield* WorkspaceStorage.WorkspaceStorage;
 
   /**
    * Resolves the file a read targets. Workspace-relative paths must stay inside the
@@ -310,6 +313,8 @@ export const make = Effect.gen(function* () {
       relativePath: input.relativePath,
     });
 
+    yield* workspaceStorage.ensureReady(target.absolutePath);
+
     yield* fileSystem.makeDirectory(path.dirname(target.absolutePath), { recursive: true }).pipe(
       Effect.mapError(
         (cause) =>
@@ -343,4 +348,6 @@ export const make = Effect.gen(function* () {
   return WorkspaceFileSystem.of({ readFile, writeFile });
 });
 
-export const layer = Layer.effect(WorkspaceFileSystem, make);
+export const layer = Layer.effect(WorkspaceFileSystem, make).pipe(
+  Layer.provide(WorkspaceStorage.layer),
+);

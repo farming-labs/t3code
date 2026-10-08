@@ -6,6 +6,8 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as ProcessRunner from "../processRunner.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
+import * as Layer from "effect/Layer";
 import * as ServerConfig from "../config.ts";
 import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
 
@@ -53,7 +55,7 @@ it.effect.skipIf(!process.env.T3CODE_TEST_RIFTRI_BINARY)(
       for (const mode of ["git", "auto", "riftri"] as const) {
         const branchesBefore = yield* git(["show-ref"]);
         const driver = yield* makeGitVcsDriverCore().pipe(
-          Effect.provide(config),
+          Effect.provide(Layer.merge(WorkspaceStorage.layer, config)),
           Effect.provideService(HostProcessEnvironment, {
             ...environment,
             T3CODE_WORKTREE_STORAGE: mode,
@@ -148,7 +150,7 @@ it.effect.skipIf(!process.env.T3CODE_TEST_RIFTRI_BINARY)(
       yield* git(["-c", "commit.gpgsign=false", "commit", "-m", "fixture"]);
       const config = ServerConfig.layerTest(cwd, path.join(root, "t3"));
       const driver = yield* makeGitVcsDriverCore().pipe(
-        Effect.provide(config),
+        Effect.provide(Layer.merge(WorkspaceStorage.layer, config)),
         Effect.provideService(HostProcessEnvironment, environment),
       );
       const destination = path.join(root, "view");
@@ -199,7 +201,7 @@ it.effect.skipIf(!process.env.T3CODE_TEST_RIFTRI_BINARY)(
       assert.include(owner.stdout, ".t3-riftri");
       assert.equal((yield* git(["status", "--porcelain"], destination)).stdout, "");
       const restarted = yield* makeGitVcsDriverCore().pipe(
-        Effect.provide(config),
+        Effect.provide(Layer.merge(WorkspaceStorage.layer, config)),
         Effect.provideService(HostProcessEnvironment, {
           ...environment,
           T3CODE_WORKTREE_STORAGE: "git",
@@ -292,7 +294,9 @@ it.effect.each([
       const refName = reference === "commit" ? commit : reference;
       const destination = path.join(root, "view");
       const driver = yield* makeGitVcsDriverCore().pipe(
-        Effect.provide(ServerConfig.layerTest(cwd, path.join(root, "t3"))),
+        Effect.provide(
+          Layer.merge(WorkspaceStorage.layer, ServerConfig.layerTest(cwd, path.join(root, "t3"))),
+        ),
         Effect.provideService(HostProcessEnvironment, environment),
       );
       yield* Effect.addFinalizer(() =>

@@ -21,6 +21,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FiberSet from "effect/FiberSet";
 import * as FileSystem from "effect/FileSystem";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -145,6 +146,7 @@ export class ProviderSessionActivityError extends Schema.TaggedError<ProviderSes
 }
 
 export const ProviderSessionManagerV2Error = Schema.Union([
+  WorkspaceStorage.WorkspaceStorageUnavailableError,
   ProviderSessionOpenError,
   ProviderWorkspaceMissingError,
   ProviderSessionLookupError,
@@ -307,24 +309,13 @@ function providerThreadLoadKey(input: {
   });
 }
 
-export const layerWithOptions = (
-  options: ProviderSessionManagerV2LayerOptions = {},
-): Layer.Layer<
-  ProviderSessionManagerV2,
-  never,
-  | EventSink.EventSinkV2
-  | FileSystem.FileSystem
-  | IdAllocator.IdAllocatorV2
-  | McpSessionRegistry.McpSessionRegistry
-  | ProjectionStore.ProjectionStoreV2
-  | ProviderEventIngestor.ProviderEventIngestorV2
-  | ProviderAdapterRegistry.ProviderAdapterRegistryV2
-> =>
+export const layerWithOptions = (options: ProviderSessionManagerV2LayerOptions = {}) =>
   Layer.effect(
     ProviderSessionManagerV2,
     Effect.gen(function* () {
       const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
       const fileSystem = yield* FileSystem.FileSystem;
+      const workspaceStorage = yield* WorkspaceStorage.WorkspaceStorage;
       const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry;
       /**
        * Optional so the many focused tests that assemble this layer by hand do
@@ -1822,6 +1813,7 @@ export const layerWithOptions = (
             Effect.gen(function* () {
               const cwd = input.runtimePolicy.cwd;
               if (cwd !== null) {
+                yield* workspaceStorage.ensureReady(cwd);
                 const workspaceIsDirectory = yield* fileSystem.stat(cwd).pipe(
                   Effect.map((stat) => stat.type === "Directory"),
                   Effect.catch((error) => Effect.succeed(error.reason._tag !== "NotFound")),
@@ -2228,6 +2220,6 @@ export const layerWithOptions = (
           ),
       } satisfies ProviderSessionManagerV2Shape);
     }),
-  );
+  ).pipe(Layer.provide(WorkspaceStorage.layer));
 
 export const layer = layerWithOptions();

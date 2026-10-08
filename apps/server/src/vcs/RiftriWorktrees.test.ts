@@ -6,10 +6,17 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as Layer from "effect/Layer";
+import { ProjectId } from "@t3tools/contracts";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as ProcessRunner from "../processRunner.ts";
 import * as RiftriWorktrees from "./RiftriWorktrees.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
+import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 
 const output = (code: number, stdout: unknown, stderr = ""): ProcessRunner.ProcessRunOutput => ({
   code: ChildProcessSpawner.ExitCode(code),
@@ -622,6 +629,9 @@ it.effect.skipIf(!process.env.T3CODE_TEST_RIFTRI_BINARY)(
       assert.isNotNull(second);
       assert.equal(first?.reused_base, false);
       assert.equal(second?.reused_base, true);
+      if (process.env.T3CODE_TEST_RIFTRI_BACKEND) {
+        assert.equal(first?.backend, process.env.T3CODE_TEST_RIFTRI_BACKEND);
+      }
       yield* storage.restore({ cwd, destinations: [firstPath, secondPath] });
       assert.equal((yield* git(["status", "--porcelain"], firstPath)).stdout, "");
       assert.equal((yield* git(["status", "--porcelain"], secondPath)).stdout, "");
@@ -632,6 +642,132 @@ it.effect.skipIf(!process.env.T3CODE_TEST_RIFTRI_BINARY)(
       yield* fs.writeFileString(path.join(firstPath, "tracked.txt"), "private edit\n");
       assert.equal(yield* fs.readFileString(path.join(secondPath, "tracked.txt")), "original\n");
       assert.equal(yield* fs.readFileString(path.join(cwd, "tracked.txt")), "original\n");
+      if (first?.backend === "overlay-fs") {
+        const checkedCommand = (command: string, args: ReadonlyArray<string>) =>
+          runner
+            .run({ command, args, cwd, env: environment })
+            .pipe(
+              Effect.tap((result) =>
+                Effect.sync(() => assert.equal(result.code, 0, result.stderr)),
+              ),
+            );
+        const remainingFields = [Schema.Record(Schema.String, Schema.Unknown)] as const;
+        const BootContext = Schema.StructWithRest(
+          Schema.Struct({ boot_id: Schema.String }),
+          remainingFields,
+        );
+        const decodeJournal = Schema.decodeUnknownEffect(
+          Schema.fromJsonString(
+            Schema.StructWithRest(
+              Schema.Struct({
+                destination: Schema.Struct({
+                  encoding: Schema.Literal("unix-bytes"),
+                  units: Schema.Array(Schema.Number),
+                }),
+                overlayfs: Schema.StructWithRest(
+                  Schema.Struct({
+                    mount_context: BootContext,
+                    mount_identity: BootContext,
+                  }),
+                  remainingFields,
+                ),
+              }),
+              remainingFields,
+            ),
+          ),
+        );
+        const operations = path.join(root, ".t3-riftri", "operations");
+        let journalPath: string | undefined;
+        for (const entry of yield* fs.readDirectory(operations)) {
+          if (!entry.endsWith(".json")) continue;
+          const candidate = path.join(operations, entry);
+          const journal = yield* decodeJournal(yield* fs.readFileString(candidate));
+          if (Buffer.from(journal.destination.units).toString("utf8") !== firstPath) continue;
+          journalPath = candidate;
+          // Only this disposable fixture's journal is changed. Mount loss and
+          // an old boot identity reproduce the post-reboot recovery boundary.
+          yield* checkedCommand("umount", ["--", firstPath]);
+          assert.isFalse(yield* fs.exists(path.join(firstPath, "tracked.txt")));
+          const previousBoot = "00000000-0000-0000-0000-000000000000";
+          yield* fs.writeFileString(
+            candidate,
+            JSON.stringify({
+              ...journal,
+              overlayfs: {
+                ...journal.overlayfs,
+                mount_context: { ...journal.overlayfs.mount_context, boot_id: previousBoot },
+                mount_identity: { ...journal.overlayfs.mount_identity, boot_id: previousBoot },
+              },
+            }),
+          );
+          break;
+        }
+        assert.isDefined(journalPath);
+        const readiness = yield* WorkspaceStorage.make.pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, runner),
+          Effect.provideService(HostProcessEnvironment, environment),
+        );
+        const projectId = ProjectId.make("overlay-recovery");
+        const startupLayer = Layer.mergeAll(
+          Layer.succeed(WorkspaceStorage.WorkspaceStorage, readiness),
+          Layer.mock(ProjectStore.ProjectStoreV2)({
+            listShells: () =>
+              Effect.succeed([
+                {
+                  id: projectId,
+                  title: "Recovery fixture",
+                  workspaceRoot: cwd,
+                  defaultModelSelection: null,
+                  scripts: [],
+                  deletedAt: null,
+                  createdAt: "2026-10-08T00:00:00.000Z",
+                  updatedAt: "2026-10-08T00:00:00.000Z",
+                },
+              ]),
+          }),
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getWorktreeRoots: () =>
+              Effect.succeed([
+                { projectId, worktreePath: firstPath },
+                { projectId, worktreePath: secondPath },
+              ]),
+          }),
+        );
+        yield* ServerRuntimeStartup.restorePersistedWorktrees.pipe(Effect.provide(startupLayer));
+        yield* readiness.ensureReady(firstPath);
+        assert.equal(
+          yield* fs.readFileString(path.join(firstPath, "tracked.txt")),
+          "private edit\n",
+        );
+        assert.equal(yield* fs.readFileString(path.join(secondPath, "tracked.txt")), "original\n");
+
+        const foreign = path.join(root, "foreign");
+        yield* fs.makeDirectory(foreign);
+        yield* fs.writeFileString(path.join(foreign, "sentinel"), "preserve foreign content\n");
+        yield* Effect.acquireUseRelease(
+          checkedCommand("mount", ["--bind", foreign, firstPath]),
+          () =>
+            Effect.gen(function* () {
+              yield* ServerRuntimeStartup.restorePersistedWorktrees.pipe(
+                Effect.provide(startupLayer),
+              );
+              yield* readiness.ensureReady(secondPath);
+              assert.isTrue(
+                Result.isFailure(yield* readiness.ensureReady(firstPath).pipe(Effect.result)),
+              );
+              assert.equal(
+                yield* fs.readFileString(path.join(firstPath, "sentinel")),
+                "preserve foreign content\n",
+              );
+            }),
+          () => checkedCommand("umount", ["--", firstPath]).pipe(Effect.orDie),
+        );
+        yield* readiness.ensureReady(firstPath);
+        assert.equal(
+          yield* fs.readFileString(path.join(firstPath, "tracked.txt")),
+          "private edit\n",
+        );
+      }
       assert.isTrue(
         Result.isFailure(
           yield* storage.remove({ cwd, destination: firstPath }).pipe(Effect.result),

@@ -146,8 +146,11 @@ must be installed; a missing or broken Riftri executable is an error, not an imp
 
 On Linux, startup checks saved worktrees before resuming providers or background work.
 Missing OverlayFS mounts are repaired and checked again. If storage cannot be verified,
-startup stops for inspection instead of letting an agent write into an unmounted directory.
-This protection still applies when new worktrees are configured to use ordinary Git.
+that workspace's providers, terminals, Git operations, and file writes stay blocked;
+other workspaces remain usable. Inspect its state with `riftri status --state-dir <directory>`
+and use `riftri repair --state-dir <directory>` when appropriate, then retry the operation.
+T3 verifies readiness before unblocking it. This protection still applies when new worktrees
+are configured to use ordinary Git.
 
 Riftri retains reusable immutable bases in a `.t3-riftri` directory beside its worktrees.
 Removing a worktree does not delete its retained base. Inspect that directory with

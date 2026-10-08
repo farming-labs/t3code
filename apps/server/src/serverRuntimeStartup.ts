@@ -39,8 +39,7 @@ import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
-import * as RiftriWorktrees from "./vcs/RiftriWorktrees.ts";
-import * as ProcessRunner from "./processRunner.ts";
+import * as WorkspaceStorage from "./workspace/WorkspaceStorage.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
@@ -400,7 +399,7 @@ export const restorePersistedWorktrees = Effect.gen(function* () {
     paths.add(root.worktreePath);
   }
   if (pathsByRepository.size === 0) return;
-  const storage = yield* RiftriWorktrees.make();
+  const storage = yield* WorkspaceStorage.WorkspaceStorage;
   for (const [cwd, destinations] of pathsByRepository) {
     yield* storage.restore({ cwd, destinations: [...destinations] });
   }
@@ -548,9 +547,7 @@ const make = (options?: StartupOptions) =>
           "worktrees.storage.restore",
           // Native clones survive a reboot without mounts. Only Linux can
           // have journaled views whose files are hidden until remounting.
-          environment.platform.os === "linux"
-            ? restorePersistedWorktrees.pipe(Effect.provide(ProcessRunner.layer))
-            : Effect.void,
+          environment.platform.os === "linux" ? restorePersistedWorktrees : Effect.void,
         ),
         recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover),
         recoverDelegatedTasks: runStartupPhase(
@@ -726,6 +723,6 @@ const make = (options?: StartupOptions) =>
   });
 
 export const layerWithOptions = (options?: StartupOptions) =>
-  Layer.effect(ServerRuntimeStartup, make(options));
+  Layer.effect(ServerRuntimeStartup, make(options)).pipe(Layer.provide(WorkspaceStorage.layer));
 
 const layer = layerWithOptions();

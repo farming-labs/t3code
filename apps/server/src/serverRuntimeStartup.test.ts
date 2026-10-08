@@ -11,7 +11,6 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 
@@ -19,6 +18,8 @@ import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ProcessRunner from "./processRunner.ts";
+import * as WorkspaceStorage from "./workspace/WorkspaceStorage.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import * as ServerConfig from "./config.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -34,74 +35,75 @@ it.effect("restores persisted worktrees by repository before their providers can
   Effect.gen(function* () {
     const calls: { cwd: string | undefined; args: ReadonlyArray<string> }[] = [];
     let repaired = false;
-    yield* ServerRuntimeStartup.restorePersistedWorktrees.pipe(
-      Effect.provide(
-        Layer.mock(ProjectStore.ProjectStoreV2)({
-          listShells: () =>
-            Effect.succeed(
-              ["one", "two", "plain"].map((id) => ({
-                id: ProjectId.make(id),
-                title: id,
-                workspaceRoot: id === "plain" ? "/not-a-repository" : "/repository",
-                defaultModelSelection: null,
-                scripts: [],
-                createdAt: "2026-10-07T00:00:00.000Z",
-                updatedAt: "2026-10-07T00:00:00.000Z",
-                deletedAt: null,
-              })),
-            ),
-        }),
-      ),
-      Effect.provide(
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getWorktreeRoots: () =>
-            Effect.succeed([
-              { projectId: ProjectId.make("one"), worktreePath: "/views/a" },
-              { projectId: ProjectId.make("two"), worktreePath: "/views/a" },
-              { projectId: ProjectId.make("two"), worktreePath: "/views/b" },
-              {
-                projectId: ProjectId.make("deleted-project"),
-                worktreePath: "/views/deleted-project",
-              },
-            ]),
-        }),
-      ),
-      Effect.provideService(ProcessRunner.ProcessRunner, {
-        run: (input) => {
-          calls.push({ cwd: input.cwd, args: input.args });
-          let report: unknown;
-          if (input.args[0] === "repair") {
-            repaired = true;
-            report = { schema_version: 1, errors: [] };
-          } else {
-            report = {
-              schema_version: 1,
-              native_path_encoding: "unix-bytes-hex",
-              worktrees: input.args.slice(input.args.indexOf("--") + 1).map((path) => ({
-                path,
-                path_native_hex: Buffer.from(path).toString("hex"),
-                state_directory: "/state",
-                state_directory_native_hex: Buffer.from("/state").toString("hex"),
-                backend: "overlay-fs",
-                mount_status: repaired ? "active" : "recovery-required",
-              })),
-            };
-          }
-          return Effect.succeed({
-            code: ChildProcessSpawner.ExitCode(0),
-            stdout: JSON.stringify(report),
-            stderr: "",
-            timedOut: false,
-            stdoutTruncated: false,
-            stderrTruncated: false,
-            stdoutInvalidUtf8: false,
-            stderrInvalidUtf8: false,
-          });
-        },
+    const testLayer = Layer.mergeAll(
+      Layer.effect(WorkspaceStorage.WorkspaceStorage, WorkspaceStorage.make),
+      Layer.mock(ProjectStore.ProjectStoreV2)({
+        listShells: () =>
+          Effect.succeed(
+            ["one", "two", "plain"].map((id) => ({
+              id: ProjectId.make(id),
+              title: id,
+              workspaceRoot: id === "plain" ? "/not-a-repository" : "/repository",
+              defaultModelSelection: null,
+              scripts: [],
+              createdAt: "2026-10-07T00:00:00.000Z",
+              updatedAt: "2026-10-07T00:00:00.000Z",
+              deletedAt: null,
+            })),
+          ),
       }),
-      Effect.provideService(HostProcessEnvironment, { RIFTRI_BINARY: "/test/riftri" }),
-      Effect.provide(Path.layer),
+      Layer.mock(ProjectionStore.ProjectionStoreV2)({
+        getWorktreeRoots: () =>
+          Effect.succeed([
+            { projectId: ProjectId.make("one"), worktreePath: "/views/a" },
+            { projectId: ProjectId.make("two"), worktreePath: "/views/a" },
+            { projectId: ProjectId.make("two"), worktreePath: "/views/b" },
+            {
+              projectId: ProjectId.make("deleted-project"),
+              worktreePath: "/views/deleted-project",
+            },
+          ]),
+      }),
+    ).pipe(
+      Layer.provide(
+        Layer.succeed(ProcessRunner.ProcessRunner, {
+          run: (input) => {
+            calls.push({ cwd: input.cwd, args: input.args });
+            let report: unknown;
+            if (input.args[0] === "repair") {
+              repaired = true;
+              report = { schema_version: 1, errors: [] };
+            } else {
+              report = {
+                schema_version: 1,
+                native_path_encoding: "unix-bytes-hex",
+                worktrees: input.args.slice(input.args.indexOf("--") + 1).map((path) => ({
+                  path,
+                  path_native_hex: Buffer.from(path).toString("hex"),
+                  state_directory: "/state",
+                  state_directory_native_hex: Buffer.from("/state").toString("hex"),
+                  backend: "overlay-fs",
+                  mount_status: repaired ? "active" : "recovery-required",
+                })),
+              };
+            }
+            return Effect.succeed({
+              code: ChildProcessSpawner.ExitCode(0),
+              stdout: JSON.stringify(report),
+              stderr: "",
+              timedOut: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+              stdoutInvalidUtf8: false,
+              stderrInvalidUtf8: false,
+            });
+          },
+        }),
+      ),
+      Layer.provide(Layer.succeed(HostProcessEnvironment, { RIFTRI_BINARY: "/test/riftri" })),
+      Layer.provide(NodeServices.layer),
     );
+    yield* ServerRuntimeStartup.restorePersistedWorktrees.pipe(Effect.provide(testLayer));
     assert.deepEqual(
       calls.map(({ args }) => args.slice(0, 2)),
       [
@@ -149,7 +151,7 @@ it.effect("starts without scanning or rebuilding projection history", () =>
   }),
 );
 
-it.effect("an unsafe persisted worktree prevents provider recovery and background work", () =>
+it.effect("failure to load startup metadata prevents provider recovery and background work", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const record = (label: string) =>

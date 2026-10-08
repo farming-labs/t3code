@@ -45,6 +45,7 @@ import {
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as RiftriWorktrees from "./RiftriWorktrees.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
@@ -907,10 +908,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig.ServerConfig;
   const crypto = yield* Crypto.Crypto;
+  const workspaceStorage = yield* WorkspaceStorage.WorkspaceStorage;
   const worktreeStorage = yield* RiftriWorktrees.make().pipe(Effect.provide(ProcessRunner.layer));
 
   const executeRaw: GitVcsDriver.GitVcsDriver["Service"]["execute"] = Effect.fnUntraced(
     function* (input) {
+      yield* workspaceStorage.ensureReady(input.cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              ...gitCommandContext(input),
+              detail:
+                "Workspace storage is not ready. Inspect and repair its Riftri state, then retry.",
+              cause,
+            }),
+        ),
+      );
       const commandInput = {
         ...input,
         args: [...input.args],
@@ -3379,6 +3392,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];
+    for (const cwd of [input.cwd, worktreePath]) {
+      yield* workspaceStorage.ensureReady(cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.createWorktree",
+              command: "git worktree add",
+              cwd: input.cwd,
+              detail:
+                "Workspace storage is not ready. Inspect and repair its Riftri state, then retry.",
+              cause,
+            }),
+        ),
+      );
+    }
     const progress = options?.progress;
     const onCheckoutProgress = progress?.onCheckoutProgress;
 
@@ -3772,6 +3800,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
     "removeWorktree",
   )(function* (input) {
+    for (const cwd of [input.cwd, input.path]) {
+      yield* workspaceStorage.ensureReady(cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.removeWorktree",
+              command: "git worktree remove",
+              cwd: input.cwd,
+              detail:
+                "Workspace storage is not ready. Inspect and repair its Riftri state, then retry.",
+              cause,
+            }),
+        ),
+      );
+    }
     const removed = yield* worktreeStorage
       .remove({
         cwd: input.cwd,

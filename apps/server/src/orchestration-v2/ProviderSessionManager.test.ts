@@ -56,6 +56,7 @@ import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
 
 const layerTestDatabase = SqlitePersistence.layerMemory;
 const layerTestStores = Layer.merge(EventStore.layer, ProjectionStore.layer).pipe(
@@ -514,6 +515,7 @@ function layerTest(input: {
     ),
   );
   return Layer.mergeAll(
+    WorkspaceStorage.layer,
     layerTestStores,
     layerConfiguredEventSink,
     IdAllocator.layer,
@@ -4267,6 +4269,49 @@ it.effect(
         ),
       );
     }),
+);
+
+it.effect("blocks provider launch only for an unverifiable persisted workspace", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const root = yield* fileSystem.makeTempDirectoryScoped();
+    const cwd = `${root}/workspace`;
+    const healthy = `${root}/healthy`;
+    yield* fileSystem.makeDirectory(cwd);
+    yield* fileSystem.makeDirectory(healthy);
+    const state = yield* Ref.make(emptyState);
+    yield* Effect.gen(function* () {
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const storage = yield* WorkspaceStorage.WorkspaceStorage;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const threadId = ThreadId.make("thread-storage-blocked");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* eventSink.write({
+        events: [
+          yield* makeThreadCreatedEvent({ idAllocator, threadId, now: yield* DateTime.now }),
+        ],
+      });
+      // A disappeared repository is not proof that its persisted worktree is
+      // unmanaged. Startup must preserve the path and block its providers.
+      yield* storage.restore({ cwd: `${root}/missing-repository`, destinations: [cwd] });
+      const input = {
+        threadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy: { ...runtimePolicy, cwd },
+      };
+      const error = yield* manager.open(input).pipe(Effect.flip);
+      assert.instanceOf(error, WorkspaceStorage.WorkspaceStorageUnavailableError);
+      assert.equal((yield* Ref.get(state)).openCount, 0);
+      assert.isTrue(yield* fileSystem.exists(cwd));
+      yield* manager.open({ ...input, runtimePolicy: { ...runtimePolicy, cwd: healthy } });
+      assert.equal((yield* Ref.get(state)).openCount, 1);
+    }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })));
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect.each(["missing", "file"] as const)(
