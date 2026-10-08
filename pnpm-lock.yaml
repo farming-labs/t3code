@@ -612,8 +612,8 @@ importers:
         specifier: 4.1.2
         version: 4.1.2
       riftri:
-        specifier: 0.6.3
-        version: 0.6.3
+        specifier: 0.6.4
+        version: 0.6.4
       stream-chain:
         specifier: ^4.2.5
         version: 4.2.5
@@ -10349,52 +10349,52 @@ packages:
   rettime@0.10.1:
     resolution: {integrity: sha512-uyDrIlUEH37cinabq0AX4QbgV4HbFZ/gqoiunWQ1UqBtRvTTytwhNYjE++pO/MjPTZL5KQCf2bEoJ/BJNVQ5Kw==}
 
-  riftri-darwin-arm64@0.6.3:
-    resolution: {integrity: sha512-uGDdjg9Svg3c6SrBgs5qlA039QPEiAjUFBzmvN249ma88B7h4BbKzHR2ssBA81ygn4qh3TBAYWSEfIyekSbkZg==}
+  riftri-darwin-arm64@0.6.4:
+    resolution: {integrity: sha512-Kvne7UaE08j3NofrUcxg9yj8coqUM+n4HaUKTvfqmEvTC/f/mOTHnMOnxa9CQ2tl990qvePuku3f5sTHsZSAZQ==}
     cpu: [arm64]
     os: [darwin]
 
-  riftri-darwin-x64@0.6.3:
-    resolution: {integrity: sha512-MghBLRCKVHUXj9tiBXKJdK35FJrkAvc5+nh4kXYa1FTqEIGMQQcHBO36nK3Hzuw/ruwMy6tL11p1kLMbjO2bvw==}
+  riftri-darwin-x64@0.6.4:
+    resolution: {integrity: sha512-awdcnUx+fnRwhPjdnVxtTScECV8Bu6nWG389lq3e2yqquzPH3OGiwRiK/mHtxanyT8yQcQO8J+0Xo1I0jM8gmw==}
     cpu: [x64]
     os: [darwin]
 
-  riftri-linux-arm64-gnu@0.6.3:
-    resolution: {integrity: sha512-s/FqkwJPcI7Pys/RMh/BZy5hufFc+oMhly93zggiOQftpMrR4t1CTOFibpmqbtTBK1iHzk057pP1gkJGfIjTHQ==}
+  riftri-linux-arm64-gnu@0.6.4:
+    resolution: {integrity: sha512-f9NGKOHWugdDO/+Ukn0J1P8zVj/evsyMXbTZmxNq4c09hW2bugR/PMk4/M3/HBpUgkVrJp0lrhjFQn+AzbddQA==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  riftri-linux-arm64-musl@0.6.3:
-    resolution: {integrity: sha512-5hh4i1WBrN8YST98W5SVsAVtyVQ3xcV+/jZ9ay8xgQEpvu4cZ7SXWQX2TPHfjme5BBVIjQaG+0t6peqGo8F9ig==}
+  riftri-linux-arm64-musl@0.6.4:
+    resolution: {integrity: sha512-SSPxUs6MQAEyfwrckSr9KxcgspT0zB2+Jb9kGORFul0Oi4jAJ3cTAs89oe/lXCkyeIVX0D4H1AxjMxav6cgcTw==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  riftri-linux-x64-gnu@0.6.3:
-    resolution: {integrity: sha512-x1RDlTSjNdB7M6o1i86t3HLrWStFZM/z+2P4i7FD7YnHT0KvSBWNv8A2VB7V7TBaBG8HwDnAUUPiCtsUvDPrpw==}
+  riftri-linux-x64-gnu@0.6.4:
+    resolution: {integrity: sha512-mwcqA2+gMtqssESHR9qL6qS/urxG9T+YAOh5U4MDOq17ors/Z1lj1+OrjYnxuI2Xp2/rqZ01ff72Eb+x/2mZEQ==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  riftri-linux-x64-musl@0.6.3:
-    resolution: {integrity: sha512-RLc4fb8dsIBpD2FCsPf3AL0+wLlFCcbZgKiXyyVVvZgzWh/Hk6Az/BxQXaB1FmQAUgAosJJVSTX94VvP4AfHzQ==}
+  riftri-linux-x64-musl@0.6.4:
+    resolution: {integrity: sha512-kA+ILlgZWPbYBnmQwJXSH4Ty48JReghtticXBzxkVTEpeNRHTuuFX5TPWtXfQ0tetcCmB/W77ClyZLYCiCdFkw==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  riftri-win32-arm64@0.6.3:
-    resolution: {integrity: sha512-gFc7A4kfcLctsaZlXCBe+CIWQHb9tZ8uCfQAWK+8jbhifitcZfdvlfJM/3OjfZXvlDR5z/upGAfk+kxYZCyyJA==}
+  riftri-win32-arm64@0.6.4:
+    resolution: {integrity: sha512-6F8nJP6ta0OUQJ7WBQysnuN1bzUth4NQWlP82KAN1GK7zjQT8tG/qNm/JZ1mvquzXWrscfdIdhjcWqxNLFClnw==}
     cpu: [arm64]
     os: [win32]
 
-  riftri-win32-x64@0.6.3:
-    resolution: {integrity: sha512-jIKh6i9iVVZybXvD1l3ycn20uq5pVOfpnvjjKNDRHPpM0cU/TqObdi/r3NyL/vf2QS5y8a//EMI384YLFlYAxw==}
+  riftri-win32-x64@0.6.4:
+    resolution: {integrity: sha512-gTtfCz4EZQTeARbTkRVrG1BASO1Ub0kPVjyR1uDBcQDTIzNikoxcTCodKNLDU5DkMyyVeTqZ2RkJ894PZjz6ww==}
     cpu: [x64]
     os: [win32]
 
-  riftri@0.6.3:
-    resolution: {integrity: sha512-REidtwKOb17c+RiqC2KMpssfpp5J5/Ir/eIP5apNx0Hb0qYPqIciukfS6Yl0t9KYyT/6ZpQwT/mHRoyWkEZWNQ==}
+  riftri@0.6.4:
+    resolution: {integrity: sha512-hio2peErY44M1E1Dk84SFbkON3gtu8ObeU91nOjg/3qMoHYynaPdrdYZ6UinFnBTQ8X6vYbkRYlnT+296EWm7Q==}
     engines: {node: '>=18.18'}
     hasBin: true
 
@@ -21639,40 +21639,40 @@ snapshots:
   rettime@0.10.1:
     optional: true
 
-  riftri-darwin-arm64@0.6.3:
+  riftri-darwin-arm64@0.6.4:
     optional: true
 
-  riftri-darwin-x64@0.6.3:
+  riftri-darwin-x64@0.6.4:
     optional: true
 
-  riftri-linux-arm64-gnu@0.6.3:
+  riftri-linux-arm64-gnu@0.6.4:
     optional: true
 
-  riftri-linux-arm64-musl@0.6.3:
+  riftri-linux-arm64-musl@0.6.4:
     optional: true
 
-  riftri-linux-x64-gnu@0.6.3:
+  riftri-linux-x64-gnu@0.6.4:
     optional: true
 
-  riftri-linux-x64-musl@0.6.3:
+  riftri-linux-x64-musl@0.6.4:
     optional: true
 
-  riftri-win32-arm64@0.6.3:
+  riftri-win32-arm64@0.6.4:
     optional: true
 
-  riftri-win32-x64@0.6.3:
+  riftri-win32-x64@0.6.4:
     optional: true
 
-  riftri@0.6.3:
+  riftri@0.6.4:
     optionalDependencies:
-      riftri-darwin-arm64: 0.6.3
-      riftri-darwin-x64: 0.6.3
-      riftri-linux-arm64-gnu: 0.6.3
-      riftri-linux-arm64-musl: 0.6.3
-      riftri-linux-x64-gnu: 0.6.3
-      riftri-linux-x64-musl: 0.6.3
-      riftri-win32-arm64: 0.6.3
-      riftri-win32-x64: 0.6.3
+      riftri-darwin-arm64: 0.6.4
+      riftri-darwin-x64: 0.6.4
+      riftri-linux-arm64-gnu: 0.6.4
+      riftri-linux-arm64-musl: 0.6.4
+      riftri-linux-x64-gnu: 0.6.4
+      riftri-linux-x64-musl: 0.6.4
+      riftri-win32-arm64: 0.6.4
+      riftri-win32-x64: 0.6.4
 
   rimraf@2.6.3:
     dependencies:

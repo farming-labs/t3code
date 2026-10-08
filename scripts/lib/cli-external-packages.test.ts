@@ -79,8 +79,8 @@ describe("shouldBundleCliDependency", () => {
       assert.strictEqual(shouldBundleCliDependency(id), false, id);
     }
     assert.deepStrictEqual(
-      selectCliRuntimeExternalDependencies({ riftri: "0.6.3", effect: "4.0.1" }),
-      { riftri: "0.6.3" },
+      selectCliRuntimeExternalDependencies({ riftri: "0.6.4", effect: "4.0.1" }),
+      { riftri: "0.6.4" },
     );
   });
 });
