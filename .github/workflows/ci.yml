@@ -148,6 +148,20 @@ jobs:
           unset RIFTRI_BINARY
           vp test run scripts/lib/riftri-packaging.test.ts -t 'complete desktop archive'
 
+      - name: Build CLI single-executable
+        env:
+          # Match the release build and SEA_NODE_VERSION in the server config.
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      - name: Package and start the standalone CLI in a temporary home
+        run: |
+          t3_artifact_version=$(node -p "require('./apps/server/package.json').version")
+          mkdir -p "$RUNNER_TEMP/t3-cli-resource-monitor/linux-x64"
+          cp native/resource-monitor/target/x86_64-unknown-linux-gnu/release/t3-resource-monitor "$RUNNER_TEMP/t3-cli-resource-monitor/linux-x64/"
+          node scripts/build-cli-archive.ts --platform linux --arch x64 --version "$t3_artifact_version" --resource-monitor-dir "$RUNNER_TEMP/t3-cli-resource-monitor" --output-dir "$RUNNER_TEMP/t3-cli-archive"
+          node scripts/smoke-cli-archive.ts --archive "$RUNNER_TEMP"/t3-cli-archive/*.tar.gz --expect-version "$t3_artifact_version"
+
   # Everything except `t3` (apps/server) and the web app, which has its own job
   # below. `--parallel` drops the package dependency ordering that `vp run`
   # applies by default: these `test` tasks declare no `dependsOn` and resolve

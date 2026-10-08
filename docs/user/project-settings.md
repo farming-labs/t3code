@@ -138,6 +138,10 @@ remote-branch guessing when a name does not resolve locally; explicit branches, 
 commit IDs, and `HEAD` can use optimized storage. Failed or interrupted mutations are
 never retried as an ordinary checkout.
 
+The benefit is lower disk use across worktrees, not guaranteed faster creation.
+Preparing and validating the shared base can take longer than an ordinary checkout.
+Dependency installs and build outputs are still private to each worktree.
+
 Set `T3CODE_WORKTREE_STORAGE=git` in the server environment to use ordinary Git for new
 worktrees, or `riftri` to require optimized creation without fallback. The default is `auto`.
 Changing this setting does not change existing worktrees: Riftri-managed removal and prune

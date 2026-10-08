@@ -122,8 +122,14 @@ it.skipIf(!process.env.T3CODE_TEST_DESKTOP_ASAR || !electron)(
       assert.isNotOk(process.env.RIFTRI_BINARY);
       assert.isTrue(NodeFS.existsSync(archive));
       assert.isFalse(archive.startsWith(`${repoRoot}${NodePath.sep}`));
-      for (let parent = NodePath.dirname(archive); ; parent = NodePath.dirname(parent)) {
-        assert.isFalse(NodeFS.existsSync(NodePath.join(parent, "node_modules")));
+      // resources/node_modules is part of the shipped artifact (Cursor's
+      // native helpers). Only ancestors outside resources must be empty.
+      for (
+        let parent = NodePath.dirname(NodePath.dirname(archive));
+        ;
+        parent = NodePath.dirname(parent)
+      ) {
+        assert.isFalse(NodeFS.existsSync(NodePath.join(parent, "node_modules")), parent);
         if (parent === NodePath.dirname(parent)) break;
       }
       const env = {
