@@ -450,6 +450,7 @@ export const ProjectReadFileResult = Schema.Struct({
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
 export const ProjectFileFailure = Schema.Literals([
+  "workspace_storage_unavailable",
   "workspace_path_outside_root",
   "resolved_path_outside_root",
   "path_not_file",
@@ -558,7 +559,9 @@ export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileEr
       ...props,
       message:
         decodedProjectErrorMessage(props) ??
-        `Failed to write workspace file '${props.relativePath}' in '${props.cwd}'.`,
+        (props.failure === "workspace_storage_unavailable"
+          ? `Workspace storage is not ready: ${props.resolvedWorkspaceRoot ?? props.cwd}. Inspect and repair its Riftri state, then retry. Existing files have been preserved.`
+          : `Failed to write workspace file '${props.relativePath}' in '${props.cwd}'.`),
     } as any);
   }
 }
