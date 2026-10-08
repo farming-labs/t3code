@@ -17,9 +17,10 @@ jobs:
   # Lint, typecheck, and the desktop build each get a runner so they run side by
   # side instead of one after another. The `Check` job at the end of this file
   # passes only when every other job does.
+  # Forks use GitHub-hosted runners without requiring the upstream runner app.
   lint:
     name: Lint
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -57,7 +58,7 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -83,7 +84,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -137,7 +138,7 @@ jobs:
   # per runner is unchanged.
   test:
     name: Test
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -201,7 +202,7 @@ jobs:
   # started last and ran alone for about 40s after everything else finished.
   test_web:
     name: Test Web
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -230,7 +231,7 @@ jobs:
   # split files by recorded duration (apps/server/src/testUtils/weightedShardSequencer.ts).
   test_server:
     name: Test Server ${{ matrix.shard }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -302,7 +303,7 @@ jobs:
     # On Blacksmith like every other job here: the GitHub-hosted queue is shared
     # with the PR bots and can leave this job waiting until it is abandoned,
     # which fails `Check` on an otherwise green run.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 5
     steps:
       - name: Require transfer measurements
@@ -315,7 +316,7 @@ jobs:
   # for checks that take under 3s, on the critical path of every PR.
   rust:
     name: Rust
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -349,7 +350,7 @@ jobs:
   # the diff cannot be resolved, the lint runs.
   mobile_native_changes:
     name: Mobile Native Changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -427,7 +428,7 @@ jobs:
     # Skip only on an explicit "no": a gate job that failed or errored leaves the
     # output empty, and that must run the lint rather than silently skip it.
     if: ${{ !cancelled() && needs.mobile_native_changes.outputs.changed != 'false' }}
-    runs-on: blacksmith-6vcpu-macos-26
+    runs-on: ${{ github.event.repository.fork && 'macos-15' || 'blacksmith-6vcpu-macos-26' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -455,7 +456,7 @@ jobs:
 
   release_smoke:
     name: Release Smoke
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -478,6 +479,83 @@ jobs:
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
 
+  riftri_storage:
+    name: Riftri storage (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Resolve published native runtimes
+        run: |
+          node --input-type=module <<'NODE' >> "$GITHUB_ENV"
+          import { createRequire } from 'node:module';
+          const server = createRequire(`${process.cwd()}/apps/server/package.json`);
+          const desktop = createRequire(`${process.cwd()}/apps/desktop/package.json`);
+          console.log(`T3CODE_TEST_RIFTRI_BINARY=${server('riftri').resolveBinary()}`);
+          console.log(`T3CODE_TEST_ELECTRON_BINARY=${desktop('electron')}`);
+          NODE
+          echo 'T3CODE_TEST_RIFTRI_PACKAGE=1' >> "$GITHUB_ENV"
+          echo 'RIFTRI_BYPASS=1' >> "$GITHUB_ENV"
+
+      - name: Prepare disposable Linux OverlayFS volume
+        if: runner.os == 'Linux'
+        run: |
+          # Only this disposable runner's mount namespace is used by the tests.
+          if test -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          truncate -s 2G "$RUNNER_TEMP/t3-riftri-overlay.img"
+          mkdir "$RUNNER_TEMP/t3-riftri-overlay"
+          mkfs.ext4 -F "$RUNNER_TEMP/t3-riftri-overlay.img"
+          sudo mount -o loop "$RUNNER_TEMP/t3-riftri-overlay.img" "$RUNNER_TEMP/t3-riftri-overlay"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/t3-riftri-overlay"
+
+      - name: Test native Git lifecycle and packaged runtime
+        shell: bash
+        run: |
+          unset RIFTRI_BINARY
+          command=(vp test run --fileParallelism=false
+            apps/server/src/vcs/RiftriWorktrees.test.ts
+            apps/server/src/vcs/GitVcsDriverCore.riftri.test.ts
+            apps/server/src/orchestration-v2/ProjectionStore.worktreeRoots.test.ts
+            apps/server/src/serverRuntimeStartup.test.ts
+            apps/server/src/serverRuntimeStartup.autoPull.test.ts
+            scripts/lib/riftri-packaging.test.ts)
+          if test "$RUNNER_OS" = Linux; then
+            export TMPDIR="$RUNNER_TEMP/t3-riftri-overlay"
+            unshare --user --map-root-user --mount --propagation private -- "${command[@]}"
+          else
+            "${command[@]}"
+          fi
+
+      - name: Unmount disposable Linux volume
+        if: always() && runner.os == 'Linux'
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/t3-riftri-overlay"; then
+            sudo umount "$RUNNER_TEMP/t3-riftri-overlay"
+          fi
+
   # Branch protection requires this job by its name, `Check`. It fails when any
   # other job fails, is cancelled, or is skipped without a reason, so splitting
   # or resharding jobs needs no ruleset change. Add every new job to `needs`.
@@ -499,8 +577,9 @@ jobs:
         mobile_native_changes,
         mobile_native_static_analysis,
         release_smoke,
+        riftri_storage,
       ]
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ github.event.repository.fork && 'ubuntu-24.04' || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 5
     steps:
       - name: Require every job to pass
