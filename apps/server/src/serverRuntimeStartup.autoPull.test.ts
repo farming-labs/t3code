@@ -139,7 +139,9 @@ it.effect("parks automatic pull until activation without delaying command readin
         Layer.mock(ProjectStore.ProjectStoreV2)({
           listShells: () => Effect.succeed(snapshot.projects),
         }),
-        Layer.mock(ProjectionStore.ProjectionStoreV2)({ getWorktreeRoots: () => Effect.succeed([]) }),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getWorktreeRoots: () => Effect.succeed([]),
+        }),
         Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
         Layer.mock(ProjectService.ProjectService)({ snapshot: Effect.succeed(snapshot) }),
         Layer.mock(ThreadManagement.ThreadManagementService)({

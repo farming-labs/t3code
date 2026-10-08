@@ -53,6 +53,12 @@ const layerTest = GitVcsDriver.layer.pipe(
     Layer.succeed(HostProcessEnvironment, {
       ...process.env,
       T3CODE_WORKTREE_STORAGE: "git",
+      // The suite's injected config is for ordinary Git. Native lifecycle
+      // commands deliberately refuse it; these disposable repos use no host config.
+      GIT_CONFIG_COUNT: undefined,
+      GIT_CONFIG_PARAMETERS: undefined,
+      GIT_CONFIG_GLOBAL: HostProcessPlatform.defaultValue() === "win32" ? "NUL" : "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
     }),
   ),
 );
