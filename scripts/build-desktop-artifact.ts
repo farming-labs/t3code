@@ -31,6 +31,7 @@ import {
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import {
   findInlinedExternalPackages,
+  RIFTRI_ASAR_UNPACK_GLOB,
   selectCliRuntimeExternalDependencies,
 } from "./lib/cli-external-packages.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
@@ -2689,7 +2690,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // not inflate the loose-file count and slow NSIS installation.
     ...(platform === "win"
       ? { asar: { smartUnpack: false }, asarUnpack: [WINDOWS_NATIVE_ASAR_UNPACK_GLOB] }
-      : {}),
+      : { asarUnpack: [RIFTRI_ASAR_UNPACK_GLOB] }),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),

@@ -130,6 +130,39 @@ such as another drive, set **Settings → Storage → Worktree location** to an 
 `D:\worktrees` or `~/worktrees`. The setting is per machine. Existing worktrees stay where they
 are, and cleanup covers both the default folder and the custom one.
 
+This fork uses Riftri for new worktrees when the repository and destination support
+native copy-on-write storage. Git still owns branches, commits, and worktree metadata;
+editors and agents use the same ordinary directories. Unsupported checkouts, such as
+repositories with submodules, use ordinary Git and log the fallback. Git also handles
+remote-branch guessing when a name does not resolve locally; explicit branches, tags,
+commit IDs, and `HEAD` can use optimized storage. Failed or interrupted mutations are
+never retried as an ordinary checkout.
+
+The benefit is lower disk use across worktrees, not guaranteed faster creation.
+Preparing and validating the shared base can take longer than an ordinary checkout.
+Dependency installs and build outputs are still private to each worktree.
+
+Set `T3CODE_WORKTREE_STORAGE=git` in the server environment to use ordinary Git for new
+worktrees, or `riftri` to require optimized creation without fallback. The default is `auto`.
+Changing this setting does not change existing worktrees: Riftri-managed removal and prune
+continue through Riftri, including after restarting the server. Native optional dependencies
+must be installed; a missing or broken Riftri executable is an error, not an implicit fallback.
+
+On Linux, startup checks saved worktrees before resuming providers or background work.
+Missing OverlayFS mounts are repaired and checked again. If storage cannot be verified,
+that workspace's providers, terminals, Git operations, and file writes stay blocked;
+other workspaces remain usable. Inspect its state with `riftri status --state-dir <directory>`
+and use `riftri repair --state-dir <directory>` when appropriate, then retry the operation.
+T3 verifies readiness before unblocking it. This protection still applies when new worktrees
+are configured to use ordinary Git.
+
+Riftri retains reusable immutable bases in a `.t3-riftri` directory beside its worktrees.
+Removing a worktree does not delete its retained base. Inspect that directory with
+`riftri status --state-dir <directory>`; use `riftri gc --state-dir <directory>` to preview
+collection before explicitly applying it. Do not delete the directory manually while views
+still depend on it. Copy-on-write reduces duplicated tracked-file storage; it does not
+share writable dependency folders or guarantee faster creation.
+
 ## Storage cleanup
 
 Open **Settings → Storage** to enable automatic cleanup on one machine or all connected
