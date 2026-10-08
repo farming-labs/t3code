@@ -1038,7 +1038,11 @@ const layerMakeServer = Layer.unwrap(
         ],
         { concurrency: "unbounded" },
       ).pipe(Effect.asVoid),
-    }).pipe(Layer.provideMerge(layerRuntimeDependencies), Layer.provide(layerLauncher));
+    }).pipe(
+      Layer.provide(ProjectionStoreV2.layer),
+      Layer.provideMerge(layerRuntimeDependencies),
+      Layer.provide(layerLauncher),
+    );
 
     const layerRoutes = HttpRouter.serve(layerMakeRoutes.pipe(Layer.provide(layerLauncher)), {
       disableLogger: !config.logWebSocketEvents,

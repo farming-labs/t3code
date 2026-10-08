@@ -68,6 +68,8 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitManager from "./GitManager.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 
 const encodeCliJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeForgejoPullRequest = Schema.decodeEffect(ForgejoPullRequestSchema);
@@ -732,6 +734,7 @@ function makeManager(input?: {
           ),
         ),
       ).pipe(
+        Layer.provide(WorkspaceStorage.layer),
         Layer.provideMerge(VcsProcess.layer),
         Layer.provideMerge(NodeServices.layer),
         Layer.provideMerge(layerServerConfig),
@@ -794,6 +797,11 @@ const layerGitManagerTest = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-manager-test-" })),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(NodeServices.layer),
+  // These fixtures remove their temporary directories directly. Native bases
+  // need journaled cleanup, covered by GitVcsDriverCore.riftri.test.ts instead.
+  Layer.provideMerge(
+    Layer.succeed(HostProcessEnvironment, { ...process.env, T3CODE_WORKTREE_STORAGE: "git" }),
+  ),
 );
 
 it.layer(layerGitManagerTest)("GitManager", (it) => {

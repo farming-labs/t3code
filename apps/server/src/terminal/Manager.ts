@@ -7,6 +7,7 @@
  * @module TerminalManager
  */
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
 import {
   DEFAULT_TERMINAL_ID,
   TerminalCwdError,
@@ -1470,6 +1471,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   options: TerminalManagerOptions,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
+  const workspaceStorage = yield* WorkspaceStorage.WorkspaceStorage;
   const path = yield* Path.Path;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
@@ -1937,6 +1939,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 
   const assertValidCwd = Effect.fn("terminal.assertValidCwd")(function* (cwd: string) {
+    yield* workspaceStorage
+      .ensureReady(cwd)
+      .pipe(Effect.mapError((cause) => new TerminalCwdStatError({ cwd, cause })));
     const stats = yield* fileSystem.stat(cwd).pipe(
       Effect.catchTags({
         PlatformError: (cause) =>
@@ -3189,4 +3194,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 });
 
-export const layer = Layer.effect(TerminalManager, make()).pipe(Layer.provide(ProcessRunner.layer));
+export const layer = Layer.effect(TerminalManager, make()).pipe(
+  Layer.provide(WorkspaceStorage.layer),
+  Layer.provide(ProcessRunner.layer),
+);

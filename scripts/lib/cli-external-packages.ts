@@ -30,6 +30,8 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "@cursor/sdk",
   // Playwright reads package.json and browsers.json beside its runtime modules.
   "playwright-core",
+  // Riftri resolves an optional platform executable relative to its package.
+  "riftri",
   "node-pty",
   "ffi-rs",
   "@yuuang/",
@@ -49,6 +51,9 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "bufferutil",
   "utf-8-validate",
 ] as const;
+
+// POSIX native executables have no extension for Electron's unpack heuristics.
+export const RIFTRI_ASAR_UNPACK_GLOB = "**/node_modules/riftri-*/bin/*";
 
 // These are Cursor's disk-backed dependency closure. Match package boundaries
 // so "zod" does not also externalize unrelated packages such as zod-to-json-schema.

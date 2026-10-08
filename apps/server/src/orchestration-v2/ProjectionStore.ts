@@ -62,6 +62,7 @@ import {
   ThreadId,
   TurnItemId,
   NodeId,
+  ProjectId,
 } from "@t3tools/contracts";
 import {
   createOrchestrationV2TurnItemVisibility,
@@ -90,6 +91,8 @@ import {
   THREAD_HISTORY_PAGE_POLICY,
   OLDER_THREAD_USER_TURN_LIMIT,
 } from "./threadHistoryPaging.ts";
+
+const WorktreeRoot = Schema.Struct({ projectId: ProjectId, worktreePath: Schema.String });
 
 export class ProjectionStoreApplyEventError extends Schema.TaggedError<ProjectionStoreApplyEventError>()(
   "ProjectionStoreApplyEventError",
@@ -381,6 +384,11 @@ export interface ProjectionStoreV2Shape {
     options?: ShellSnapshotOptions,
   ) => Effect.Effect<
     Effect.Effect<OrchestrationV2ThreadShellSnapshot, ProjectionStoreV2Error>,
+    ProjectionStoreV2Error
+  >;
+  /** Storage startup needs roots, not run/session/message enrichment. Includes archives. */
+  readonly getWorktreeRoots: () => Effect.Effect<
+    ReadonlyArray<typeof WorktreeRoot.Type>,
     ProjectionStoreV2Error
   >;
   readonly getThreadShell: (
@@ -5515,6 +5523,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         )
         .pipe(Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })));
 
+    const getWorktreeRoots: ProjectionStoreV2Shape["getWorktreeRoots"] = () =>
+      sql`
+        SELECT DISTINCT
+          json_extract(payload_json, '$.projectId') AS projectId,
+          json_extract(payload_json, '$.worktreePath') AS worktreePath
+        FROM orchestration_v2_projection_threads
+        WHERE deleted_at IS NULL
+          AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
+      `.pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(WorktreeRoot))),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const getThreadsWithPullRequests: ProjectionStoreV2Shape["getThreadsWithPullRequests"] = (
       threadId,
     ) =>
@@ -5877,6 +5898,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       apply,
       getShellSnapshot,
       readShellSnapshot,
+      getWorktreeRoots,
       getThreadShell,
       getThread,
       getSettlementCandidates,
@@ -5922,6 +5944,20 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
     const sequence = yield* Ref.make(0);
 
     const service: ProjectionStoreV2Shape = {
+      getWorktreeRoots: () =>
+        Ref.get(replayState).pipe(
+          Effect.map(({ projections }) => {
+            const roots = new Map<string, typeof WorktreeRoot.Type>();
+            for (const { thread } of projections.values()) {
+              if (thread.deletedAt !== null || thread.worktreePath === null) continue;
+              roots.set(JSON.stringify([thread.projectId, thread.worktreePath]), {
+                projectId: thread.projectId,
+                worktreePath: thread.worktreePath,
+              });
+            }
+            return [...roots.values()];
+          }),
+        ),
       apply: (event) =>
         Effect.gen(function* () {
           const result = yield* Ref.modify(replayState, (existing) => {

@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - realpathSync.native resolves Windows 8.3 short names, which the Effect realPath does not.
 import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { assert, it, describe } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -38,6 +38,7 @@ import {
   windowsLongPathConfigEnv,
 } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
 
 const encodeGitCommandError = Schema.encodeEffect(Schema.fromJsonString(GitCommandError));
 
@@ -47,6 +48,21 @@ const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
 const layerTest = GitVcsDriver.layer.pipe(
   Layer.provide(layerServerConfig),
   Layer.provideMerge(NodeServices.layer),
+  // These fixtures assert ordinary Git checkout progress and prune behavior.
+  // Native ownership/recovery and retained-base cleanup have real filesystem
+  // coverage in GitVcsDriverCore.riftri.test.ts.
+  Layer.provideMerge(
+    Layer.succeed(HostProcessEnvironment, {
+      ...process.env,
+      T3CODE_WORKTREE_STORAGE: "git",
+      // The suite's injected config is for ordinary Git. Native lifecycle
+      // commands deliberately refuse it; these disposable repos use no host config.
+      GIT_CONFIG_COUNT: undefined,
+      GIT_CONFIG_PARAMETERS: undefined,
+      GIT_CONFIG_GLOBAL: HostProcessPlatform.defaultValue() === "win32" ? "NUL" : "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+    }),
+  ),
 );
 
 const makeNonRepositoryHandle = () =>
@@ -172,6 +188,7 @@ it.effect("bounds Git bursts across drivers without timing out queued commands",
     const drivers = yield* Effect.all(
       Array.from({ length: 16 }, () =>
         makeGitVcsDriverCore().pipe(
+          Effect.provide(WorkspaceStorage.layer),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         ),
       ),
@@ -231,6 +248,7 @@ it.effect.each([{ timeoutMs: null }, { timeoutMs: 30_001 }])(
         ),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
       const slow = yield* driver
@@ -422,6 +440,7 @@ it.effect("coalesces concurrent ref pages into one repository snapshot", () =>
         }),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, countingSpawner),
       );
       const cwd = yield* makeTmpDir();
@@ -534,6 +553,7 @@ it.effect("retries an in-flight ref snapshot invalidated by a mutation", () =>
         }),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, coordinatingSpawner),
       );
       const cwd = yield* makeTmpDir();
@@ -573,6 +593,7 @@ it.effect("invalidates a ref snapshot when a mutation fails after changing Git",
         }),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, partiallyFailingSpawner),
       );
       const cwd = yield* makeTmpDir();
@@ -605,6 +626,7 @@ it.effect("fails a ref snapshot when for-each-ref exits unsuccessfully", () =>
         }),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, failingSnapshotSpawner),
       );
       const cwd = yield* makeTmpDir();
@@ -643,6 +665,7 @@ it.effect("marks the current branch when worktree metadata is unavailable", () =
         }),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, incompleteMetadataSpawner),
       );
       const cwd = yield* makeTmpDir();
@@ -679,6 +702,7 @@ it.effect("ignores worktree metadata for directories that no longer exist", () =
         }),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, staleWorktreeSpawner),
       );
       const cwd = yield* makeTmpDir();
@@ -740,6 +764,7 @@ it.effect("backs off and logs failed fetch attempts across linked worktrees", ()
         }),
       );
       const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provide(WorkspaceStorage.layer),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, failingFetchSpawner),
       );
       const warnings: string[] = [];
@@ -915,6 +940,7 @@ it.effect.each([
       }),
     );
     const driver = yield* makeGitVcsDriverCore().pipe(
+      Effect.provide(WorkspaceStorage.layer),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
     const cwd = yield* makeTmpDir();
@@ -1424,8 +1450,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           return delegate.spawn(command);
         });
         const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(WorkspaceStorage.layer, layerServerConfig)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provide(layerServerConfig),
         );
         const branch = yield* driver.getReviewDiffPreview({
           cwd,
@@ -1463,8 +1489,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             : delegate.spawn(command),
         );
         const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(WorkspaceStorage.layer, layerServerConfig)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provide(layerServerConfig),
         );
         const result = yield* driver.getReviewDiffPreview({ cwd }).pipe(Effect.result);
         assert.isTrue(Result.isFailure(result));
@@ -1667,8 +1693,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             : delegate.spawn(command);
         });
         const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(WorkspaceStorage.layer, layerServerConfig)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, failingLsFilesSpawner),
-          Effect.provide(layerServerConfig),
         );
         const cwd = yield* makeTmpDir();
         yield* initRepoWithCommit(cwd).pipe(
@@ -2334,8 +2360,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           }),
         );
         const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(WorkspaceStorage.layer, layerServerConfig)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provide(layerServerConfig),
         );
 
         for (const hasUpstream of [false, true]) {
@@ -3263,8 +3289,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           }),
         );
         const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(WorkspaceStorage.layer, layerServerConfig)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, delayedRemovalSpawner),
-          Effect.provide(layerServerConfig),
         );
         const cwd = yield* makeTmpDir();
         const { initialBranch } = yield* initRepoWithCommit(cwd);
@@ -3572,8 +3598,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
             }),
           );
           const driver = yield* makeGitVcsDriverCore().pipe(
+            Effect.provide(Layer.merge(WorkspaceStorage.layer, layerServerConfig)),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-            Effect.provide(layerServerConfig),
           );
           const fetching = yield* driver
             .fetchRemote({ cwd, remoteName: "origin", refName: "main" })
@@ -3752,8 +3778,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           }),
         );
         const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provide(Layer.merge(WorkspaceStorage.layer, layerServerConfig)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, delayedPushSpawner),
-          Effect.provide(layerServerConfig),
         );
         const cwd = yield* makeTmpDir();
         const remote = yield* makeTmpDir("git-remote-");
