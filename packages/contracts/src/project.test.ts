@@ -26,6 +26,8 @@ const decodeProjectUpdatePayload = Schema.decodeUnknownSync(ProjectUpdatePayload
 const decodeProjectMutation = Schema.decodeUnknownSync(ProjectMutation);
 const decodeSearchEntriesInput = Schema.decodeUnknownSync(ProjectSearchEntriesInput);
 const decodeSearchContentsInput = Schema.decodeUnknownSync(ProjectSearchContentsInput);
+const encodeWriteErrorJson = Schema.encodeSync(Schema.fromJsonString(ProjectWriteFileError));
+const decodeWriteErrorJson = Schema.decodeUnknownSync(Schema.fromJsonString(ProjectWriteFileError));
 
 describe("project search inputs", () => {
   it("allows an empty entries query for bounded frecency browsing", () => {
@@ -52,6 +54,20 @@ describe("project search inputs", () => {
 });
 
 describe("project RPC errors", () => {
+  it("keeps storage repair guidance through a write-error wire round trip", () => {
+    const error = new ProjectWriteFileError({
+      cwd: "/workspace",
+      relativePath: "new.txt",
+      failure: "workspace_storage_unavailable",
+      resolvedWorkspaceRoot: "/workspace",
+      cause: new Error("private native output"),
+    });
+    const decoded = decodeWriteErrorJson(encodeWriteErrorJson(error));
+    expect(decoded.failure).toBe("workspace_storage_unavailable");
+    expect(decoded.message).toContain("Inspect and repair its Riftri state, then retry");
+    expect(decoded.message).not.toContain("private native output");
+  });
+
   it("derives stable messages from structured request context while retaining causes", () => {
     const cause = new Error("sensitive platform detail");
     const searchError = new ProjectSearchEntriesError({

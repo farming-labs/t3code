@@ -629,11 +629,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       );
 
       // Windows unpacks native files explicitly so their JavaScript and metadata
-      // stay archived. Other platforms retain electron-builder's defaults.
+      // stay archived. POSIX executables without an extension are explicit too.
       assert.notProperty(mac, "asar");
       assert.notProperty(linux, "asar");
-      assert.notProperty(mac, "asarUnpack");
-      assert.notProperty(linux, "asarUnpack");
+      assert.deepStrictEqual(mac.asarUnpack, ["**/node_modules/riftri-*/bin/*"]);
+      assert.deepStrictEqual(linux.asarUnpack, ["**/node_modules/riftri-*/bin/*"]);
       assert.deepStrictEqual(win.asar, { smartUnpack: false });
       assert.deepStrictEqual(win.asarUnpack, [WINDOWS_NATIVE_ASAR_UNPACK_GLOB]);
       assert.deepStrictEqual(winWithoutWslRuntime.asar, win.asar);
