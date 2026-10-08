@@ -513,6 +513,11 @@ function projectFileFailureContext(
   readonly operationPath?: string;
 } {
   switch (error._tag) {
+    case "WorkspaceStorageUnavailableError":
+      return {
+        failure: "workspace_storage_unavailable",
+        resolvedWorkspaceRoot: error.workspaceRoot,
+      };
     case "WorkspacePathOutsideRootError":
       return { failure: "workspace_path_outside_root" };
     case "WorkspaceFileSystemOperationError":

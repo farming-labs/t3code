@@ -84,7 +84,7 @@ jobs:
   build:
     name: Build
     runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -128,6 +128,38 @@ jobs:
 
       - name: Verify preload bundle output
         run: node apps/desktop/scripts/verify-preload-bundle.mjs
+
+      - name: Build unsigned desktop archive without publishing
+        env:
+          T3CODE_DESKTOP_SIGNED: "false"
+        run: |
+          sudo apt-get install -y imagemagick
+          node scripts/build-desktop-artifact.ts --platform linux --target tar.gz --arch x64 --skip-build --output-dir "$RUNNER_TEMP/t3-desktop-archive"
+
+      - name: Verify Riftri in the complete desktop archive
+        run: |
+          mkdir "$RUNNER_TEMP/t3-desktop-extracted"
+          tar -xzf "$RUNNER_TEMP"/t3-desktop-archive/*.tar.gz -C "$RUNNER_TEMP/t3-desktop-extracted"
+          T3CODE_TEST_DESKTOP_ASAR=$(find "$RUNNER_TEMP/t3-desktop-extracted" -name app.asar -type f)
+          test -f "$T3CODE_TEST_DESKTOP_ASAR"
+          export T3CODE_TEST_DESKTOP_ASAR
+          export T3CODE_TEST_ELECTRON_BINARY=$(node -e "console.log(require(require.resolve('electron', { paths: ['./apps/desktop'] })))")
+          unset RIFTRI_BINARY
+          vp test run scripts/lib/riftri-packaging.test.ts -t 'complete desktop archive'
+
+      - name: Build CLI single-executable
+        env:
+          # Match the release build and SEA_NODE_VERSION in the server config.
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      - name: Package and start the standalone CLI in a temporary home
+        run: |
+          t3_artifact_version=$(node -p "require('./apps/server/package.json').version")
+          mkdir -p "$RUNNER_TEMP/t3-cli-resource-monitor/linux-x64"
+          cp native/resource-monitor/target/x86_64-unknown-linux-gnu/release/t3-resource-monitor "$RUNNER_TEMP/t3-cli-resource-monitor/linux-x64/"
+          node scripts/build-cli-archive.ts --platform linux --arch x64 --version "$t3_artifact_version" --resource-monitor-dir "$RUNNER_TEMP/t3-cli-resource-monitor" --output-dir "$RUNNER_TEMP/t3-cli-archive"
+          node scripts/smoke-cli-archive.ts --archive "$RUNNER_TEMP"/t3-cli-archive/*.tar.gz --expect-version "$t3_artifact_version"
 
   # Everything except `t3` (apps/server) and the web app, which has its own job
   # below. `--parallel` drops the package dependency ordering that `vp run`
@@ -478,6 +510,115 @@ jobs:
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
 
+  riftri_storage:
+    name: Riftri storage (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Resolve published native runtimes
+        run: |
+          node --input-type=module <<'NODE' >> "$GITHUB_ENV"
+          import { createRequire } from 'node:module';
+          const server = createRequire(`${process.cwd()}/apps/server/package.json`);
+          const desktop = createRequire(`${process.cwd()}/apps/desktop/package.json`);
+          console.log(`T3CODE_TEST_RIFTRI_BINARY=${server('riftri').resolveBinary()}`);
+          console.log(`T3CODE_TEST_ELECTRON_BINARY=${desktop('electron')}`);
+          NODE
+          echo 'T3CODE_TEST_RIFTRI_PACKAGE=1' >> "$GITHUB_ENV"
+          echo 'RIFTRI_BYPASS=1' >> "$GITHUB_ENV"
+
+      - name: Prepare disposable Linux OverlayFS volume
+        if: runner.os == 'Linux'
+        run: |
+          # Only this disposable runner's mount namespace is used by the tests.
+          if test -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          truncate -s 2G "$RUNNER_TEMP/t3-riftri-overlay.img"
+          mkdir "$RUNNER_TEMP/t3-riftri-overlay"
+          mkfs.ext4 -F "$RUNNER_TEMP/t3-riftri-overlay.img"
+          sudo mount -o loop "$RUNNER_TEMP/t3-riftri-overlay.img" "$RUNNER_TEMP/t3-riftri-overlay"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/t3-riftri-overlay"
+
+      - name: Prepare disposable macOS APFS volume
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil create -size 1g -fs APFS -volname T3RiftriProof -type SPARSEBUNDLE "$RUNNER_TEMP/t3-riftri-apfs.sparsebundle"
+          mkdir "$RUNNER_TEMP/t3-riftri-apfs"
+          hdiutil attach -nobrowse -mountpoint "$RUNNER_TEMP/t3-riftri-apfs" "$RUNNER_TEMP/t3-riftri-apfs.sparsebundle"
+          touch "$RUNNER_TEMP/t3-riftri-apfs/.metadata_never_index"
+
+      - name: Test native Git lifecycle and packaged runtime
+        shell: bash
+        run: |
+          unset RIFTRI_BINARY
+          command=(vp test run --fileParallelism=false
+            apps/server/src/vcs/RiftriWorktrees.test.ts
+            apps/server/src/vcs/GitVcsDriverCore.riftri.test.ts
+            apps/server/src/vcs/GitVcsDriverCore.riftri.performance.test.ts
+            apps/server/src/orchestration-v2/ProjectionStore.worktreeRoots.test.ts
+            apps/server/src/serverRuntimeStartup.test.ts
+            apps/server/src/serverRuntimeStartup.autoPull.test.ts
+            apps/server/src/workspace/WorkspaceStorage.test.ts
+            scripts/lib/riftri-packaging.test.ts)
+          export T3CODE_TEST_RIFTRI_REPORT="$RUNNER_TEMP/t3-riftri-performance.json"
+          if test "$RUNNER_OS" = Linux; then
+            export T3CODE_TEST_RIFTRI_BACKEND=overlay-fs
+            export TMPDIR="$RUNNER_TEMP/t3-riftri-overlay"
+            export T3CODE_TEST_RIFTRI_VOLUME="$TMPDIR"
+            unshare --user --map-root-user --mount --propagation private -- "${command[@]}"
+          else
+            export T3CODE_TEST_RIFTRI_BACKEND=apfs-clone
+            export TMPDIR="$RUNNER_TEMP/t3-riftri-apfs"
+            export T3CODE_TEST_RIFTRI_VOLUME="$TMPDIR"
+            "${command[@]}"
+          fi
+
+      - name: Upload physical storage and latency measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: riftri-performance-${{ matrix.os }}
+          path: ${{ runner.temp }}/t3-riftri-performance.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Unmount disposable macOS volume
+        if: always() && runner.os == 'macOS'
+        run: |
+          if mount | grep -Fq " on $RUNNER_TEMP/t3-riftri-apfs "; then
+            hdiutil detach "$RUNNER_TEMP/t3-riftri-apfs"
+          fi
+
+      - name: Unmount disposable Linux volume
+        if: always() && runner.os == 'Linux'
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/t3-riftri-overlay"; then
+            sudo umount "$RUNNER_TEMP/t3-riftri-overlay"
+          fi
+
   # Branch protection requires this job by its name, `Check`. It fails when any
   # other job fails, is cancelled, or is skipped without a reason, so splitting
   # or resharding jobs needs no ruleset change. Add every new job to `needs`.
@@ -499,6 +640,7 @@ jobs:
         mobile_native_changes,
         mobile_native_static_analysis,
         release_smoke,
+        riftri_storage,
       ]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5

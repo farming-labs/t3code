@@ -43,6 +43,9 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import * as ServerConfig from "../config.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import * as RiftriWorktrees from "./RiftriWorktrees.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
@@ -945,9 +948,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const { worktreesDir } = yield* ServerConfig.ServerConfig;
   const crypto = yield* Crypto.Crypto;
   const hostPlatform = yield* HostProcessPlatform;
+  const workspaceStorage = yield* WorkspaceStorage.WorkspaceStorage;
+  const worktreeStorage = yield* RiftriWorktrees.make().pipe(Effect.provide(ProcessRunner.layer));
 
   const executeRaw: GitVcsDriver.GitVcsDriver["Service"]["execute"] = Effect.fnUntraced(
     function* (input) {
+      yield* workspaceStorage.ensureReady(input.cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              ...gitCommandContext(input),
+              detail:
+                "Workspace storage is not ready. Inspect and repair its Riftri state, then retry.",
+              cause,
+            }),
+        ),
+      );
       const commandInput = {
         ...input,
         args: [...input.args],
@@ -3417,32 +3433,73 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];
+    for (const cwd of [input.cwd, worktreePath]) {
+      yield* workspaceStorage.ensureReady(cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.createWorktree",
+              command: "git worktree add",
+              cwd: input.cwd,
+              detail:
+                "Workspace storage is not ready. Inspect and repair its Riftri state, then retry.",
+              cause,
+            }),
+        ),
+      );
+    }
     const progress = options?.progress;
     const onCheckoutProgress = progress?.onCheckoutProgress;
 
-    const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
-    yield* executeGit(
-      "GitVcsDriver.createWorktree",
-      input.cwd,
-      ["-c", `checkout.workers=${checkoutWorkers}`, ...args],
-      {
-        fallbackErrorDetail: "git worktree add failed",
-        timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
-        ...(onCheckoutProgress
-          ? {
-              // Git only prints checkout progress when stderr is a tty or the
-              // delay elapsed. GIT_PROGRESS_DELAY=0 forces it through the pipe.
-              env: { GIT_PROGRESS_DELAY: "0", LC_ALL: "C" },
-              progress: {
-                onStderrLine: (line) => {
-                  const parsed = parseGitCheckoutProgressLine(line);
-                  return parsed ? onCheckoutProgress(parsed) : Effect.void;
+    const optimized = yield* worktreeStorage
+      .create({
+        cwd: input.cwd,
+        destination: worktreePath,
+        revision: input.refName,
+        ...(input.newRefName ? { branch: input.newRefName } : {}),
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.createWorktree",
+              command: "riftri worktree add",
+              cwd: input.cwd,
+              ...cause.gitErrorFields,
+              cause,
+            }),
+        ),
+      );
+    if (optimized === null) {
+      const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
+      yield* executeGit(
+        "GitVcsDriver.createWorktree",
+        input.cwd,
+        ["-c", `checkout.workers=${checkoutWorkers}`, ...args],
+        {
+          fallbackErrorDetail: "git worktree add failed",
+          timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
+          env: { RIFTRI_BYPASS: "1" },
+          ...(onCheckoutProgress
+            ? {
+                // Git only prints checkout progress when stderr is a tty or the
+                // delay elapsed. GIT_PROGRESS_DELAY=0 forces it through the pipe.
+                env: {
+                  RIFTRI_BYPASS: "1",
+                  GIT_PROGRESS_DELAY: "0",
+                  LC_ALL: "C",
                 },
-              },
-            }
-          : {}),
-      },
-    );
+                progress: {
+                  onStderrLine: (line) => {
+                    const parsed = parseGitCheckoutProgressLine(line);
+                    return parsed ? onCheckoutProgress(parsed) : Effect.void;
+                  },
+                },
+              }
+            : {}),
+        },
+      );
+    }
 
     if (progress?.onWorktreeClaimed) {
       yield* progress.onWorktreeClaimed(worktreePath);
@@ -3784,6 +3841,40 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
     "removeWorktree",
   )(function* (input) {
+    for (const cwd of [input.cwd, input.path]) {
+      yield* workspaceStorage.ensureReady(cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.removeWorktree",
+              command: "git worktree remove",
+              cwd: input.cwd,
+              detail:
+                "Workspace storage is not ready. Inspect and repair its Riftri state, then retry.",
+              cause,
+            }),
+        ),
+      );
+    }
+    const removed = yield* worktreeStorage
+      .remove({
+        cwd: input.cwd,
+        destination: input.path,
+        ...(input.force ? { force: true } : {}),
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.removeWorktree",
+              command: "riftri worktree remove",
+              cwd: input.cwd,
+              ...cause.gitErrorFields,
+              cause,
+            }),
+        ),
+      );
+    if (removed) return;
     // Git refuses to remove a worktree with untracked files unless forced, but
     // its check honors `status.showUntrackedFiles=no` and would delete them.
     const args = ["-c", "status.showUntrackedFiles=normal", "worktree", "remove"];
@@ -3800,6 +3891,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         // minutes, especially on Windows. Keep it bounded without interrupting
         // git midway through cleanup.
         timeoutMs: WORKTREE_REMOVE_TIMEOUT_MS,
+        env: { RIFTRI_BYPASS: "1" },
         allowNonZeroExit: true,
       },
     );
@@ -3835,10 +3927,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const pruneWorktrees: GitVcsDriver.GitVcsDriver["Service"]["pruneWorktrees"] = Effect.fn(
     "pruneWorktrees",
   )(function* (input) {
-    yield* executeGit("GitVcsDriver.pruneWorktrees", input.cwd, ["worktree", "prune"], {
-      timeoutMs: 15_000,
-      fallbackErrorDetail: "git worktree prune failed",
-    });
+    yield* worktreeStorage.prune(input.cwd).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation: "GitVcsDriver.pruneWorktrees",
+            command: "riftri worktree prune",
+            cwd: input.cwd,
+            ...cause.gitErrorFields,
+            cause,
+          }),
+      ),
+    );
   });
 
   const deleteLocalBranch: GitVcsDriver.GitVcsDriver["Service"]["deleteLocalBranch"] = Effect.fn(

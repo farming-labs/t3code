@@ -58,6 +58,16 @@ catalog:
   yaml: ^2.9.0
 
 minimumReleaseAgeExclude:
+  # v0.6.3's signed release and all nine npm provenance receipts were verified.
+  - riftri@0.6.3
+  - riftri-darwin-arm64@0.6.3
+  - riftri-darwin-x64@0.6.3
+  - riftri-linux-arm64-gnu@0.6.3
+  - riftri-linux-arm64-musl@0.6.3
+  - riftri-linux-x64-gnu@0.6.3
+  - riftri-linux-x64-musl@0.6.3
+  - riftri-win32-arm64@0.6.3
+  - riftri-win32-x64@0.6.3
   - expo-glass-effect@58.0.3
   - expo-blur@58.0.3
   - expo-audio@58.0.4
