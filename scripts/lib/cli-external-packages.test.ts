@@ -63,6 +63,26 @@ describe("shouldBundleCliDependency", () => {
   it("treats prefix-matched siblings as external", () => {
     assert.strictEqual(shouldBundleCliDependency("node-gyp-build-optional-packages"), false);
   });
+
+  it("keeps Riftri's resolver and every native executable on disk", () => {
+    for (const id of [
+      "riftri",
+      "riftri-darwin-arm64",
+      "riftri-darwin-x64",
+      "riftri-linux-arm64-gnu",
+      "riftri-linux-arm64-musl",
+      "riftri-linux-x64-gnu",
+      "riftri-linux-x64-musl",
+      "riftri-win32-arm64",
+      "riftri-win32-x64",
+    ]) {
+      assert.strictEqual(shouldBundleCliDependency(id), false, id);
+    }
+    assert.deepStrictEqual(
+      selectCliRuntimeExternalDependencies({ riftri: "0.6.3", effect: "4.0.1" }),
+      { riftri: "0.6.3" },
+    );
+  });
 });
 
 describe("selectCliRuntimeExternalDependencies", () => {

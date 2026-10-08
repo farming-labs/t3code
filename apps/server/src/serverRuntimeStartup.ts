@@ -39,7 +39,10 @@ import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
+import * as RiftriWorktrees from "./vcs/RiftriWorktrees.ts";
+import * as ProcessRunner from "./processRunner.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -381,22 +384,47 @@ export const startEffectWorkerWithRelay = Effect.fn(
   );
 });
 
+export const restorePersistedWorktrees = Effect.gen(function* () {
+  const projects = yield* (yield* ProjectStore.ProjectStoreV2).listShells();
+  const roots = yield* (yield* ProjectionStore.ProjectionStoreV2).getWorktreeRoots();
+  const repositories = new Map(projects.map((project) => [project.id, project.workspaceRoot]));
+  const pathsByRepository = new Map<string, Set<string>>();
+  for (const root of roots) {
+    const repository = repositories.get(root.projectId);
+    if (repository === undefined) continue;
+    let paths = pathsByRepository.get(repository);
+    if (paths === undefined) {
+      paths = new Set();
+      pathsByRepository.set(repository, paths);
+    }
+    paths.add(root.worktreePath);
+  }
+  if (pathsByRepository.size === 0) return;
+  const storage = yield* RiftriWorktrees.make();
+  for (const [cwd, destinations] of pathsByRepository) {
+    yield* storage.restore({ cwd, destinations: [...destinations] });
+  }
+});
+
 export function runOrderedV2StartupPhases<
   Import,
   Recovery,
   Bootstrap,
   ImportError,
+  StorageError,
   RecoveryError,
   DelegationError,
   WorkerError,
   BootstrapError,
   ImportContext,
+  StorageContext,
   RecoveryContext,
   DelegationContext,
   WorkerContext,
   BootstrapContext,
 >(input: {
   readonly importLegacyShells: Effect.Effect<Import, ImportError, ImportContext>;
+  readonly restoreWorktreeStorage: Effect.Effect<void, StorageError, StorageContext>;
   readonly recover: Effect.Effect<Recovery, RecoveryError, RecoveryContext>;
   /** Settles delegated tasks whose runs recovery just terminalized. */
   readonly recoverDelegatedTasks: Effect.Effect<void, DelegationError, DelegationContext>;
@@ -405,6 +433,7 @@ export function runOrderedV2StartupPhases<
 }) {
   return Effect.gen(function* () {
     yield* input.importLegacyShells;
+    yield* input.restoreWorktreeStorage;
     const recovery = yield* input.recover;
     yield* input.recoverDelegatedTasks;
     yield* input.startEffectWorker;
@@ -514,6 +543,14 @@ const make = (options?: StartupOptions) =>
                 : Effect.logInfo("Imported legacy v1 thread shells", summary),
             ),
           ),
+        ),
+        restoreWorktreeStorage: runStartupPhase(
+          "worktrees.storage.restore",
+          // Native clones survive a reboot without mounts. Only Linux can
+          // have journaled views whose files are hidden until remounting.
+          environment.platform.os === "linux"
+            ? restorePersistedWorktrees.pipe(Effect.provide(ProcessRunner.layer))
+            : Effect.void,
         ),
         recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover),
         recoverDelegatedTasks: runStartupPhase(

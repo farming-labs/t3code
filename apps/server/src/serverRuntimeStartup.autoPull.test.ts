@@ -1,4 +1,5 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { expect, it } from "@effect/vitest";
 import { DEFAULT_SERVER_SETTINGS, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
@@ -19,6 +20,7 @@ import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
 import * as LegacyV1ThreadImporter from "./orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeRecoveryService.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
@@ -137,6 +139,8 @@ it.effect("parks automatic pull until activation without delaying command readin
         Layer.mock(ProjectStore.ProjectStoreV2)({
           listShells: () => Effect.succeed(snapshot.projects),
         }),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({ getWorktreeRoots: () => Effect.succeed([]) }),
+        Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
         Layer.mock(ProjectService.ProjectService)({ snapshot: Effect.succeed(snapshot) }),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getShellSnapshot: () =>

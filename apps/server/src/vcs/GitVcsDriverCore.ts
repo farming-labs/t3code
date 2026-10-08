@@ -43,6 +43,8 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import * as ServerConfig from "../config.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import * as RiftriWorktrees from "./RiftriWorktrees.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
@@ -905,6 +907,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig.ServerConfig;
   const crypto = yield* Crypto.Crypto;
+  const worktreeStorage = yield* RiftriWorktrees.make().pipe(Effect.provide(ProcessRunner.layer));
 
   const executeRaw: GitVcsDriver.GitVcsDriver["Service"]["execute"] = Effect.fnUntraced(
     function* (input) {
@@ -3379,29 +3382,55 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const progress = options?.progress;
     const onCheckoutProgress = progress?.onCheckoutProgress;
 
-    const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
-    yield* executeGit(
-      "GitVcsDriver.createWorktree",
-      input.cwd,
-      ["-c", `checkout.workers=${checkoutWorkers}`, ...args],
-      {
-        fallbackErrorDetail: "git worktree add failed",
-        timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
-        ...(onCheckoutProgress
-          ? {
-              // Git only prints checkout progress when stderr is a tty or the
-              // delay elapsed. GIT_PROGRESS_DELAY=0 forces it through the pipe.
-              env: { GIT_PROGRESS_DELAY: "0", LC_ALL: "C" },
-              progress: {
-                onStderrLine: (line) => {
-                  const parsed = parseGitCheckoutProgressLine(line);
-                  return parsed ? onCheckoutProgress(parsed) : Effect.void;
+    const optimized = yield* worktreeStorage
+      .create({
+        cwd: input.cwd,
+        destination: worktreePath,
+        revision: input.refName,
+        ...(input.newRefName ? { branch: input.newRefName } : {}),
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.createWorktree",
+              command: "riftri worktree add",
+              cwd: input.cwd,
+              ...cause.gitErrorFields,
+              cause,
+            }),
+        ),
+      );
+    if (optimized === null) {
+      const checkoutWorkers = (yield* readConfigValue(input.cwd, "checkout.workers")) ?? "0";
+      yield* executeGit(
+        "GitVcsDriver.createWorktree",
+        input.cwd,
+        ["-c", `checkout.workers=${checkoutWorkers}`, ...args],
+        {
+          fallbackErrorDetail: "git worktree add failed",
+          timeoutMs: WORKTREE_ADD_TIMEOUT_MS,
+          env: { RIFTRI_BYPASS: "1" },
+          ...(onCheckoutProgress
+            ? {
+                // Git only prints checkout progress when stderr is a tty or the
+                // delay elapsed. GIT_PROGRESS_DELAY=0 forces it through the pipe.
+                env: {
+                  RIFTRI_BYPASS: "1",
+                  GIT_PROGRESS_DELAY: "0",
+                  LC_ALL: "C",
                 },
-              },
-            }
-          : {}),
-      },
-    );
+                progress: {
+                  onStderrLine: (line) => {
+                    const parsed = parseGitCheckoutProgressLine(line);
+                    return parsed ? onCheckoutProgress(parsed) : Effect.void;
+                  },
+                },
+              }
+            : {}),
+        },
+      );
+    }
 
     if (progress?.onWorktreeClaimed) {
       yield* progress.onWorktreeClaimed(worktreePath);
@@ -3743,6 +3772,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
     "removeWorktree",
   )(function* (input) {
+    const removed = yield* worktreeStorage
+      .remove({
+        cwd: input.cwd,
+        destination: input.path,
+        ...(input.force ? { force: true } : {}),
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.removeWorktree",
+              command: "riftri worktree remove",
+              cwd: input.cwd,
+              ...cause.gitErrorFields,
+              cause,
+            }),
+        ),
+      );
+    if (removed) return;
     const args = ["worktree", "remove"];
     if (input.force) {
       args.push("--force");
@@ -3757,6 +3805,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         // minutes, especially on Windows. Keep it bounded without interrupting
         // git midway through cleanup.
         timeoutMs: WORKTREE_REMOVE_TIMEOUT_MS,
+        env: { RIFTRI_BYPASS: "1" },
         allowNonZeroExit: true,
       },
     );
@@ -3792,10 +3841,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const pruneWorktrees: GitVcsDriver.GitVcsDriver["Service"]["pruneWorktrees"] = Effect.fn(
     "pruneWorktrees",
   )(function* (input) {
-    yield* executeGit("GitVcsDriver.pruneWorktrees", input.cwd, ["worktree", "prune"], {
-      timeoutMs: 15_000,
-      fallbackErrorDetail: "git worktree prune failed",
-    });
+    yield* worktreeStorage.prune(input.cwd).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation: "GitVcsDriver.pruneWorktrees",
+            command: "riftri worktree prune",
+            cwd: input.cwd,
+            ...cause.gitErrorFields,
+            cause,
+          }),
+      ),
+    );
   });
 
   const deleteLocalBranch: GitVcsDriver.GitVcsDriver["Service"]["deleteLocalBranch"] = Effect.fn(
