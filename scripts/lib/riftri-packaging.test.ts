@@ -110,3 +110,70 @@ it.skipIf(!electron)(
   () => probe(electron),
   60_000,
 );
+
+it.skipIf(!process.env.T3CODE_TEST_DESKTOP_ASAR || !electron)(
+  "loads the server and native dependency from the complete desktop archive",
+  async () => {
+    const archive = NodePath.resolve(process.env.T3CODE_TEST_DESKTOP_ASAR!);
+    const scratch = await NodeFSP.realpath(
+      await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-desktop-riftri-")),
+    );
+    try {
+      assert.isNotOk(process.env.RIFTRI_BINARY);
+      assert.isTrue(NodeFS.existsSync(archive));
+      assert.isFalse(archive.startsWith(`${repoRoot}${NodePath.sep}`));
+      for (let parent = NodePath.dirname(archive); ; parent = NodePath.dirname(parent)) {
+        assert.isFalse(NodeFS.existsSync(NodePath.join(parent, "node_modules")));
+        if (parent === NodePath.dirname(parent)) break;
+      }
+      const env = {
+        ...process.env,
+        NODE_PATH: "",
+        NODE_OPTIONS: "",
+        ELECTRON_RUN_AS_NODE: "1",
+        RIFTRI_BYPASS: "1",
+        GIT_CONFIG_GLOBAL: NodePath.join(scratch, "empty.gitconfig"),
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_COUNT: undefined,
+        GIT_CONFIG_PARAMETERS: undefined,
+      };
+      await NodeFSP.writeFile(env.GIT_CONFIG_GLOBAL, "");
+      NodeChildProcess.execFileSync("git", ["init", "--quiet", scratch], { env });
+      const entry = NodePath.join(archive, "apps/server/dist/bin.mjs");
+      const version = NodeChildProcess.execFileSync(
+        electron!,
+        ["--no-global-search-paths", entry, "--version"],
+        { cwd: scratch, env, encoding: "utf8", timeout: 30_000 },
+      );
+      assert.match(version, /\d+\.\d+\.\d+/);
+      const output = NodeChildProcess.execFileSync(
+        electron!,
+        [
+          "--no-global-search-paths",
+          "-e",
+          `
+          const assert = require('node:assert/strict');
+          const { createRequire } = require('node:module');
+          const path = require('node:path');
+          const server = createRequire(${JSON.stringify(entry)});
+          assert(server.resolve('riftri').startsWith(${JSON.stringify(`${archive}/`)}));
+          const { Riftri, resolveBinary } = server('riftri');
+          const binary = resolveBinary();
+          assert(binary.startsWith(${JSON.stringify(`${archive}.unpacked/`)}));
+          const client = new Riftri({ repository: process.cwd() });
+          client.worktree.inspect([process.cwd()]).then(report => {
+            assert.equal(report.worktrees.length, 1);
+            assert.equal(report.worktrees[0].state_directory, null);
+            console.log('Complete desktop archive loaded the server and executed its own Riftri package.');
+          }).catch(error => { console.error(error); process.exitCode = 1; });
+        `,
+        ],
+        { cwd: scratch, env, encoding: "utf8", timeout: 30_000 },
+      );
+      assert.include(output, "executed its own Riftri package");
+    } finally {
+      await NodeFSP.rm(scratch, { recursive: true, force: true });
+    }
+  },
+  60_000,
+);

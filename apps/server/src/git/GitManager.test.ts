@@ -69,6 +69,7 @@ import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.t
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitManager from "./GitManager.ts";
+import * as WorkspaceStorage from "../workspace/WorkspaceStorage.ts";
 
 const encodeCliJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeForgejoPullRequest = Schema.decodeEffect(ForgejoPullRequestSchema);
@@ -714,6 +715,7 @@ function makeManager(input?: {
           ),
         ),
       ).pipe(
+        Layer.provide(WorkspaceStorage.layer),
         Layer.provideMerge(VcsProcess.layer),
         Layer.provideMerge(NodeServices.layer),
         Layer.provideMerge(layerServerConfig),
